@@ -237,6 +237,55 @@ h2 {
   background: linear-gradient(90deg, #22c55e, #f59e0b);
 }
 
+.exam-panel {
+  gap: 14px;
+}
+
+.exam-facts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.exam-facts div {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border-radius: 14px;
+  background: #111827;
+}
+
+.exam-facts strong {
+  color: #f59e0b;
+}
+
+.exam-facts span {
+  color: #d1d5db;
+  font-size: 0.86rem;
+}
+
+.segmented {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  padding: 5px;
+  border-radius: 16px;
+  background: #111827;
+}
+
+.segmented button {
+  min-height: 40px;
+  border-radius: 12px;
+  color: #d1d5db;
+  background: transparent;
+  font-weight: 900;
+}
+
+.segmented button.active {
+  color: #111827;
+  background: #f59e0b;
+}
+
 .quiz-screen {
   padding-bottom: 24px;
 }

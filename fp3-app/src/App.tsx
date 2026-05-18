@@ -24,6 +24,7 @@ type StudyState = {
 
 type Mode = 'home' | 'quiz' | 'category' | 'settings' | 'result';
 type ReviewChoice = 'understood' | 'review' | null;
+type ExamFilter = '全部' | '学科' | '実技';
 
 type QuizSession = {
   title: string;
@@ -140,6 +141,10 @@ function shuffle<T>(items: T[]): T[] {
   return [...items].sort(() => Math.random() - 0.5);
 }
 
+function examTypeFor(question: Question): '学科' | '実技' {
+  return question.examType ?? '学科';
+}
+
 function isYesterday(date: string) {
   if (!date) return false;
   const yesterday = new Date();
@@ -167,12 +172,12 @@ function getUserType(state: StudyState): string {
   return 'ライフプラン作戦参謀';
 }
 
-function categoryStats(logs: AnswerLog[]) {
+function categoryStats(logs: AnswerLog[], pool = questions) {
   const understoodIds = new Set(logs.filter((log) => log.correct && !log.review).map((log) => log.questionId));
   return categories.map((category) => {
     const items = logs.filter((log) => log.category === category);
     const correct = items.filter((log) => log.correct).length;
-    const categoryQuestionIds = questions.filter((question) => question.category === category).map((question) => question.id);
+    const categoryQuestionIds = pool.filter((question) => question.category === category).map((question) => question.id);
     const understood = categoryQuestionIds.filter((id) => understoodIds.has(id)).length;
     return {
       category,
@@ -182,7 +187,7 @@ function categoryStats(logs: AnswerLog[]) {
       level: Math.max(1, Math.floor(correct / 4) + 1),
       understood,
       total: categoryQuestionIds.length,
-      mastery: Math.round((understood / categoryQuestionIds.length) * 100),
+      mastery: categoryQuestionIds.length ? Math.round((understood / categoryQuestionIds.length) * 100) : 0,
     };
   });
 }
@@ -262,21 +267,26 @@ function App() {
   const [reviewChoice, setReviewChoice] = useState<ReviewChoice>(null);
   const [lastXpDelta, setLastXpDelta] = useState(0);
   const [lastPenalty, setLastPenalty] = useState(0);
+  const [examFilter, setExamFilter] = useState<ExamFilter>('全部');
 
   const today = todayKey();
+  const activeQuestions = questions.filter((question) => examFilter === '全部' || examTypeFor(question) === examFilter);
   const todaysLogs = study.logs.filter((log) => log.answeredAt.slice(0, 10) === today);
   const totalCorrect = study.logs.filter((log) => log.correct).length;
   const totalRate = study.logs.length ? Math.round((totalCorrect / study.logs.length) * 100) : 0;
   const weak = weakestCategory(study.logs);
-  const stats = useMemo(() => categoryStats(study.logs), [study.logs]);
+  const stats = useMemo(() => categoryStats(study.logs, activeQuestions), [study.logs, activeQuestions]);
   const understoodIds = useMemo(
     () => new Set(study.logs.filter((log) => log.correct && !log.review).map((log) => log.questionId)),
     [study.logs],
   );
-  const masteryRate = Math.round((understoodIds.size / questions.length) * 100);
+  const activeUnderstoodCount = activeQuestions.filter((question) => understoodIds.has(question.id)).length;
+  const masteryRate = Math.round((activeUnderstoodCount / activeQuestions.length) * 100);
+  const academicTotal = questions.filter((question) => examTypeFor(question) === '学科').length;
+  const practicalTotal = questions.filter((question) => examTypeFor(question) === '実技').length;
 
   const startSession = (type: QuizSession['mode'], category?: Category) => {
-    let pool = questions;
+    let pool = activeQuestions;
     let title = 'ランダム10問';
     let count = 10;
 
@@ -287,14 +297,14 @@ function App() {
 
     if (type === 'review') {
       const reviewIds = new Set(study.logs.filter((log) => !log.correct || log.review).map((log) => log.questionId));
-      pool = questions.filter((question) => reviewIds.has(question.id));
-      if (pool.length < 5) pool = questions;
+      pool = activeQuestions.filter((question) => reviewIds.has(question.id));
+      if (pool.length < 5) pool = activeQuestions;
       title = '苦手だけ復習';
       count = Math.min(10, pool.length);
     }
 
     if (type === 'category' && category) {
-      pool = questions.filter((question) => question.category === category);
+      pool = activeQuestions.filter((question) => question.category === category);
       title = category;
       count = Math.min(10, pool.length);
     }
@@ -475,11 +485,42 @@ function App() {
             </div>
           </div>
 
+          <section className="panel exam-panel">
+            <div className="section-head">
+              <div>
+                <p className="eyebrow">合格設計</p>
+                <h2>学科と実技を分けて潰す</h2>
+              </div>
+            </div>
+            <div className="exam-facts">
+              <div>
+                <strong>学科</strong>
+                <span>60問 / 36点以上</span>
+              </div>
+              <div>
+                <strong>実技</strong>
+                <span>40問 / 60点以上</span>
+              </div>
+            </div>
+            <p>現状は学科 {academicTotal}問、実技 {practicalTotal}問。合格用にはこの後、実技ケース問題と計算問題をさらに増やす前提です。</p>
+            <div className="segmented">
+              {(['全部', '学科', '実技'] as ExamFilter[]).map((filter) => (
+                <button
+                  key={filter}
+                  className={examFilter === filter ? 'active' : ''}
+                  onClick={() => setExamFilter(filter)}
+                >
+                  {filter}
+                </button>
+              ))}
+            </div>
+          </section>
+
           <section className="panel mastery-panel">
             <div className="section-head">
               <div>
                 <p className="eyebrow">理解進捗</p>
-                <h2>全60問のうち {understoodIds.size} 問理解</h2>
+                <h2>{examFilter} {activeQuestions.length}問のうち {activeUnderstoodCount} 問理解</h2>
               </div>
               <strong>{masteryRate}%</strong>
             </div>
@@ -532,7 +573,7 @@ function App() {
             </strong>
           </div>
           <article className="question-card">
-            <p className="category-pill">{session.questions[session.index].category}</p>
+            <p className="category-pill">{examTypeFor(session.questions[session.index])} / {session.questions[session.index].category}</p>
             <h2>{session.questions[session.index].question}</h2>
             <div className="choices">
               {session.questions[session.index].choices.map((choice, index) => {
