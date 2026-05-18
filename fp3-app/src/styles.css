@@ -186,6 +186,13 @@ h2 {
   background: rgba(239, 68, 68, 0.18);
 }
 
+.secondary-button.selected {
+  outline: 2px solid #f59e0b;
+  outline-offset: 2px;
+  color: #111827;
+  background: #f59e0b;
+}
+
 .panel {
   display: grid;
   gap: 12px;
@@ -207,6 +214,27 @@ h2 {
 
 .level-row:last-child {
   border-bottom: 0;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.section-head strong {
+  color: #f59e0b;
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.mastery-panel p {
+  color: #d1d5db;
+}
+
+.mastery-bar span {
+  background: linear-gradient(90deg, #22c55e, #f59e0b);
 }
 
 .quiz-screen {
@@ -307,6 +335,54 @@ h2 {
 .result-card p {
   color: #e5e7eb;
   line-height: 1.7;
+}
+
+.xp-delta {
+  width: fit-content;
+  padding: 6px 10px;
+  border-radius: 999px;
+  color: #fef3c7;
+  background: rgba(245, 158, 11, 0.12);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.deep-explanation {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 16px;
+  background: #111827;
+}
+
+.deep-explanation h3 {
+  margin: 0;
+  color: #f59e0b;
+  font-size: 0.92rem;
+}
+
+.glossary-list {
+  display: grid;
+  gap: 8px;
+}
+
+.glossary-list div {
+  display: grid;
+  gap: 3px;
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.glossary-list strong {
+  color: #f9fafb;
+  font-size: 0.92rem;
+}
+
+.glossary-list span {
+  color: #d1d5db;
+  font-size: 0.88rem;
+  line-height: 1.6;
 }
 
 .milestone {

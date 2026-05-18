@@ -23,6 +23,7 @@ type StudyState = {
 };
 
 type Mode = 'home' | 'quiz' | 'category' | 'settings' | 'result';
+type ReviewChoice = 'understood' | 'review' | null;
 
 type QuizSession = {
   title: string;
@@ -34,6 +35,9 @@ type QuizSession = {
 
 const STORAGE_KEY = 'fp3-dopaben-v1';
 const SOUND_KEY = 'fp3-dopaben-sound-v1';
+const CORRECT_XP = 10;
+const WRONG_XP = -5;
+const MISSED_DAY_PENALTY = 30;
 const todayKey = () => new Date().toISOString().slice(0, 10);
 
 const initialState: StudyState = {
@@ -126,7 +130,7 @@ function mergeStudyState(current: StudyState, incoming: StudyState): StudyState 
   const latestDate = sortedDates[sortedDates.length - 1] ?? '';
   return {
     logs,
-    xp: Math.max(current.xp, incoming.xp, logs.reduce((sum, log) => sum + (log.correct ? 10 : 3), 0)),
+    xp: Math.max(current.xp, incoming.xp, logs.reduce((sum, log) => sum + (log.correct ? CORRECT_XP : WRONG_XP), 0)),
     lastStudyDate: latestDate,
     streak: Math.max(current.streak, incoming.streak),
   };
@@ -143,6 +147,14 @@ function isYesterday(date: string) {
   return date === yesterday.toISOString().slice(0, 10);
 }
 
+function missedDaysSince(date: string) {
+  if (!date) return 0;
+  const last = new Date(`${date}T00:00:00`);
+  const current = new Date(`${todayKey()}T00:00:00`);
+  const diff = Math.floor((current.getTime() - last.getTime()) / 86400000);
+  return Math.max(0, diff - 1);
+}
+
 function getUserType(state: StudyState): string {
   const byCategory = categoryStats(state.logs);
   const top = [...byCategory].sort((a, b) => b.answered - a.answered)[0];
@@ -156,15 +168,21 @@ function getUserType(state: StudyState): string {
 }
 
 function categoryStats(logs: AnswerLog[]) {
+  const understoodIds = new Set(logs.filter((log) => log.correct && !log.review).map((log) => log.questionId));
   return categories.map((category) => {
     const items = logs.filter((log) => log.category === category);
     const correct = items.filter((log) => log.correct).length;
+    const categoryQuestionIds = questions.filter((question) => question.category === category).map((question) => question.id);
+    const understood = categoryQuestionIds.filter((id) => understoodIds.has(id)).length;
     return {
       category,
       answered: items.length,
       correct,
       rate: items.length ? Math.round((correct / items.length) * 100) : 0,
       level: Math.max(1, Math.floor(correct / 4) + 1),
+      understood,
+      total: categoryQuestionIds.length,
+      mastery: Math.round((understood / categoryQuestionIds.length) * 100),
     };
   });
 }
@@ -173,6 +191,62 @@ function weakestCategory(logs: AnswerLog[]): Category | 'まだなし' {
   const answered = categoryStats(logs).filter((item) => item.answered > 0);
   if (!answered.length) return 'まだなし';
   return answered.sort((a, b) => a.rate - b.rate || b.answered - a.answered)[0].category;
+}
+
+const glossary = [
+  ['老齢基礎年金', '国民年金から出る老後の年金。会社員も自営業も共通の土台です。'],
+  ['国民年金', '20歳以上60歳未満の人が原則加入する公的年金です。'],
+  ['厚生年金', '会社員や公務員などが加入する、国民年金に上乗せされる年金です。'],
+  ['第3号被保険者', '厚生年金加入者に扶養される配偶者。自分で国民年金保険料を納めない区分です。'],
+  ['傷病手当金', '私的な病気やけがで働けず、給料が出ない時の健康保険の給付です。'],
+  ['雇用保険', '失業、育児休業、介護休業などに備える働く人向けの保険です。'],
+  ['キャッシュフロー表', '将来の収入、支出、貯蓄残高を年ごとに並べる家計の未来表です。'],
+  ['iDeCo', '自分で掛金を出し、自分で運用する老後資金制度。掛金は所得控除の対象です。'],
+  ['所得控除', '税率をかける前の所得を減らす仕組み。結果として税金が軽くなります。'],
+  ['税額控除', '計算された税額から直接差し引く仕組み。所得控除より効き方が直接的です。'],
+  ['基礎控除', '多くの人に認められる基本的な所得控除。ただし高所得では減ります。'],
+  ['給与所得控除', '会社員などの給与収入から差し引く概算の必要経費のような控除です。'],
+  ['医療費控除', '一定額を超える医療費を払った時、確定申告で使える所得控除です。'],
+  ['超過累進税率', '所得が多い部分ほど高い税率をかける所得税の仕組みです。'],
+  ['青色申告', 'きちんと帳簿をつける代わりに控除などの特典がある申告制度です。'],
+  ['NISA', '投資で得た一定の利益が非課税になる制度。元本保証ではありません。'],
+  ['PER', '株価が1株利益の何倍かを見る指標。株価の割高・割安を見る材料です。'],
+  ['債券', '国や会社にお金を貸すイメージの商品。価格と利回りは逆に動きやすいです。'],
+  ['投資信託', '多くの人のお金を集め、専門家が株式や債券などに分散投資する商品です。'],
+  ['為替リスク', '外貨建て商品の円換算額が、円高・円安で変わるリスクです。'],
+  ['定期保険', '一定期間だけ死亡保障を持つ保険。掛け捨て型が多いです。'],
+  ['終身保険', '一生涯続く死亡保険。貯蓄性を持つこともあります。'],
+  ['地震保険', '地震、噴火、津波による損害に備える保険。火災保険に付けて契約します。'],
+  ['個人賠償責任保険', '日常生活で他人にけがや損害を与えた時の賠償に備える保険です。'],
+  ['必要保障額', '遺族の生活費などから貯蓄や公的保障を引いて考える、必要な死亡保障額です。'],
+  ['建ぺい率', '敷地に対して建物がどれだけ地面を覆うかの割合です。'],
+  ['容積率', '敷地に対する延べ床面積の割合。何階建て相当まで建てられるかに関係します。'],
+  ['重要事項説明', '不動産契約前に、物件や条件の大事な点を説明する手続きです。'],
+  ['固定資産税', '土地や建物を持っている人に毎年かかる地方税です。'],
+  ['不動産取得税', '土地や建物を取得した時にかかる地方税です。'],
+  ['公示価格', '国土交通省が公表する土地価格の目安です。'],
+  ['譲渡所得', '不動産や株などを売って出た利益に関する所得です。'],
+  ['法定相続人', '民法上、相続人になる人。配偶者と血族相続人を順番で考えます。'],
+  ['相続放棄', '財産も借金も相続しない選択。原則3か月以内に家庭裁判所へ申述します。'],
+  ['遺言', '死亡後の財産の分け方などを残す意思表示。方式のルールがあります。'],
+  ['遺留分', '一定の相続人に保障される最低限の取り分です。兄弟姉妹にはありません。'],
+  ['相続税の基礎控除', '3,000万円 + 600万円 × 法定相続人の数。まず覚える相続税の入口です。'],
+  ['暦年課税', '1月から12月までの贈与を年単位で見る贈与税の課税方式です。'],
+  ['相続時精算課税', '贈与時点で一定の扱いをし、相続時にまとめて精算する制度です。'],
+] as const;
+
+function glossaryFor(question: Question) {
+  const text = `${question.question} ${question.choices.join(' ')} ${question.explanation}`;
+  return glossary.filter(([term]) => text.includes(term)).slice(0, 4);
+}
+
+function reasoningFor(question: Question) {
+  const answer = question.choices[question.answerIndex];
+  return {
+    answer,
+    why: `この問題は「${answer}」がキーワードです。FP3級では、制度の名前よりも「誰が対象か」「いつ使うか」「何を差し引くか」を押さえると解きやすくなります。`,
+    trap: '迷った選択肢は、「必ず」「全額」「一切」「無条件」のような強すぎる表現を疑うと切れます。FPの制度は所得要件、期間、上限、対象者がセットで出ます。',
+  };
 }
 
 function App() {
@@ -185,6 +259,9 @@ function App() {
   const [syncText, setSyncText] = useState('');
   const [syncMessage, setSyncMessage] = useState('');
   const [soundOn, setSoundOn] = useState(() => localStorage.getItem(SOUND_KEY) !== 'off');
+  const [reviewChoice, setReviewChoice] = useState<ReviewChoice>(null);
+  const [lastXpDelta, setLastXpDelta] = useState(0);
+  const [lastPenalty, setLastPenalty] = useState(0);
 
   const today = todayKey();
   const todaysLogs = study.logs.filter((log) => log.answeredAt.slice(0, 10) === today);
@@ -192,6 +269,11 @@ function App() {
   const totalRate = study.logs.length ? Math.round((totalCorrect / study.logs.length) * 100) : 0;
   const weak = weakestCategory(study.logs);
   const stats = useMemo(() => categoryStats(study.logs), [study.logs]);
+  const understoodIds = useMemo(
+    () => new Set(study.logs.filter((log) => log.correct && !log.review).map((log) => log.questionId)),
+    [study.logs],
+  );
+  const masteryRate = Math.round((understoodIds.size / questions.length) * 100);
 
   const startSession = (type: QuizSession['mode'], category?: Category) => {
     let pool = questions;
@@ -226,11 +308,15 @@ function App() {
     });
     setSelectedIndex(null);
     setShowMilestone(false);
+    setReviewChoice(null);
+    setLastXpDelta(0);
+    setLastPenalty(0);
     setMode('quiz');
   };
 
   const updateStudy = (question: Question, correct: boolean, review: boolean) => {
     const nextDate = todayKey();
+    const penalty = study.lastStudyDate && study.lastStudyDate !== nextDate ? missedDaysSince(study.lastStudyDate) * MISSED_DAY_PENALTY : 0;
     const nextStreak =
       study.lastStudyDate === nextDate ? study.streak : isYesterday(study.lastStudyDate) ? study.streak + 1 : 1;
     const next: StudyState = {
@@ -244,12 +330,13 @@ function App() {
           answeredAt: new Date().toISOString(),
         },
       ],
-      xp: study.xp + (correct ? 10 : 3),
+      xp: study.xp + (correct ? CORRECT_XP : WRONG_XP) - penalty,
       lastStudyDate: nextDate,
       streak: nextStreak,
     };
     setStudy(next);
     saveStudyState(next);
+    return penalty;
   };
 
   const choose = (choiceIndex: number) => {
@@ -258,8 +345,11 @@ function App() {
     const correct = choiceIndex === current.answerIndex;
     setSelectedIndex(choiceIndex);
     setLastCorrect(correct);
+    const penalty = updateStudy(current, correct, !correct);
+    setLastXpDelta((correct ? CORRECT_XP : WRONG_XP) - penalty);
+    setLastPenalty(penalty);
+    setReviewChoice(correct ? null : 'review');
     setSession({ ...session, correctCount: session.correctCount + (correct ? 1 : 0) });
-    updateStudy(current, correct, !correct);
     playSound(correct ? 'correct' : 'wrong', soundOn);
     if ((session.index + 1) % 5 === 0) {
       setShowMilestone(true);
@@ -278,6 +368,7 @@ function App() {
     };
     setStudy(next);
     saveStudyState(next);
+    setReviewChoice(review ? 'review' : 'understood');
   };
 
   const nextQuestion = () => {
@@ -290,6 +381,9 @@ function App() {
     setSession({ ...session, index: session.index + 1 });
     setSelectedIndex(null);
     setShowMilestone(false);
+    setReviewChoice(null);
+    setLastXpDelta(0);
+    setLastPenalty(0);
   };
 
   const reset = () => {
@@ -381,6 +475,20 @@ function App() {
             </div>
           </div>
 
+          <section className="panel mastery-panel">
+            <div className="section-head">
+              <div>
+                <p className="eyebrow">理解進捗</p>
+                <h2>全60問のうち {understoodIds.size} 問理解</h2>
+              </div>
+              <strong>{masteryRate}%</strong>
+            </div>
+            <div className="xp-bar mastery-bar" aria-label={`理解進捗 ${masteryRate}%`}>
+              <span style={{ width: `${masteryRate}%` }} />
+            </div>
+            <p>「理解した」を押した問題だけを進捗に入れています。正解しても不安なら復習に残せます。</p>
+          </section>
+
           <div className="action-stack">
             <button className="primary-button" onClick={() => startSession('five')}>5問だけやる</button>
             <button className="secondary-button" onClick={() => startSession('ten')}>ランダム10問</button>
@@ -394,7 +502,7 @@ function App() {
               {stats.map((item) => (
                 <div key={item.category} className="level-row">
                   <span>{item.category}</span>
-                  <strong>Lv.{item.level}</strong>
+                  <strong>Lv.{item.level} / {item.mastery}%</strong>
                 </div>
               ))}
             </div>
@@ -450,12 +558,45 @@ function App() {
 
           {selectedIndex !== null && (
             <div className={`answer-panel ${lastCorrect ? 'good' : 'bad'}`}>
-              <strong>{lastCorrect ? '正解 XP +10' : '不正解 XP +3'}</strong>
+              <strong>{lastCorrect ? `正解 XP +${CORRECT_XP}` : `不正解 XP ${WRONG_XP}`}</strong>
+              <p className="xp-delta">
+                今回: {lastXpDelta > 0 ? `+${lastXpDelta}` : lastXpDelta} XP
+                {lastPenalty > 0 && ` / 未学習ペナルティ -${lastPenalty}`}
+              </p>
               <p>{session.questions[session.index].explanation}</p>
+              <div className="deep-explanation">
+                <h3>こう考える</h3>
+                <p>{reasoningFor(session.questions[session.index]).why}</p>
+                <h3>ひっかけの見抜き方</h3>
+                <p>{reasoningFor(session.questions[session.index]).trap}</p>
+                {glossaryFor(session.questions[session.index]).length > 0 && (
+                  <>
+                    <h3>単語ミニ辞典</h3>
+                    <div className="glossary-list">
+                      {glossaryFor(session.questions[session.index]).map(([term, description]) => (
+                        <div key={term}>
+                          <strong>{term}</strong>
+                          <span>{description}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
               {showMilestone && <div className="milestone">今日の最低ノルマ達成。5問やった人間は受かる側。</div>}
               <div className="two-buttons">
-                <button className="secondary-button" onClick={() => markReview(false)}>理解した</button>
-                <button className="secondary-button danger" onClick={() => markReview(true)}>あとで復習</button>
+                <button
+                  className={`secondary-button ${reviewChoice === 'understood' ? 'selected' : ''}`}
+                  onClick={() => markReview(false)}
+                >
+                  理解した
+                </button>
+                <button
+                  className={`secondary-button danger ${reviewChoice === 'review' ? 'selected' : ''}`}
+                  onClick={() => markReview(true)}
+                >
+                  あとで復習
+                </button>
               </div>
               <button className="primary-button" onClick={nextQuestion}>
                 {session.index + 1 >= session.questions.length ? '結果を見る' : '次の問題へ'}
