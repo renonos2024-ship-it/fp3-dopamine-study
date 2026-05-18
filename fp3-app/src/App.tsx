@@ -1,6 +1,12 @@
 import { useMemo, useState } from 'react';
 import { categories, questions, type Category, type Question } from './data/questions';
 
+declare global {
+  interface Window {
+    webkitAudioContext?: typeof AudioContext;
+  }
+}
+
 type AnswerLog = {
   questionId: string;
   category: Category;
@@ -27,6 +33,7 @@ type QuizSession = {
 };
 
 const STORAGE_KEY = 'fp3-dopaben-v1';
+const SOUND_KEY = 'fp3-dopaben-sound-v1';
 const todayKey = () => new Date().toISOString().slice(0, 10);
 
 const initialState: StudyState = {
@@ -47,6 +54,53 @@ function loadStudyState(): StudyState {
 
 function saveStudyState(next: StudyState) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+}
+
+type SoundName = 'correct' | 'wrong' | 'milestone' | 'finish';
+
+function playTone(frequency: number, start: number, duration: number, gain: number, ctx: AudioContext) {
+  const oscillator = ctx.createOscillator();
+  const volume = ctx.createGain();
+  oscillator.type = 'sine';
+  oscillator.frequency.setValueAtTime(frequency, start);
+  volume.gain.setValueAtTime(0.0001, start);
+  volume.gain.exponentialRampToValueAtTime(gain, start + 0.015);
+  volume.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+  oscillator.connect(volume);
+  volume.connect(ctx.destination);
+  oscillator.start(start);
+  oscillator.stop(start + duration + 0.03);
+}
+
+function playSound(name: SoundName, enabled: boolean) {
+  if (!enabled) return;
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) return;
+  const ctx = new AudioContextClass();
+  const now = ctx.currentTime;
+  const patterns: Record<SoundName, Array<[number, number, number, number]>> = {
+    correct: [
+      [660, 0, 0.08, 0.055],
+      [880, 0.08, 0.12, 0.06],
+    ],
+    wrong: [
+      [220, 0, 0.12, 0.05],
+      [165, 0.1, 0.16, 0.045],
+    ],
+    milestone: [
+      [523, 0, 0.08, 0.05],
+      [659, 0.08, 0.08, 0.055],
+      [784, 0.16, 0.16, 0.06],
+    ],
+    finish: [
+      [392, 0, 0.08, 0.05],
+      [523, 0.08, 0.08, 0.055],
+      [659, 0.16, 0.08, 0.055],
+      [1046, 0.24, 0.18, 0.06],
+    ],
+  };
+  patterns[name].forEach(([frequency, delay, duration, gain]) => playTone(frequency, now + delay, duration, gain, ctx));
+  window.setTimeout(() => void ctx.close(), 800);
 }
 
 function encodeStudyState(state: StudyState) {
@@ -130,6 +184,7 @@ function App() {
   const [showMilestone, setShowMilestone] = useState(false);
   const [syncText, setSyncText] = useState('');
   const [syncMessage, setSyncMessage] = useState('');
+  const [soundOn, setSoundOn] = useState(() => localStorage.getItem(SOUND_KEY) !== 'off');
 
   const today = todayKey();
   const todaysLogs = study.logs.filter((log) => log.answeredAt.slice(0, 10) === today);
@@ -205,7 +260,11 @@ function App() {
     setLastCorrect(correct);
     setSession({ ...session, correctCount: session.correctCount + (correct ? 1 : 0) });
     updateStudy(current, correct, !correct);
-    if ((session.index + 1) % 5 === 0) setShowMilestone(true);
+    playSound(correct ? 'correct' : 'wrong', soundOn);
+    if ((session.index + 1) % 5 === 0) {
+      setShowMilestone(true);
+      window.setTimeout(() => playSound('milestone', soundOn), 180);
+    }
   };
 
   const markReview = (review: boolean) => {
@@ -224,6 +283,7 @@ function App() {
   const nextQuestion = () => {
     if (!session) return;
     if (session.index + 1 >= session.questions.length) {
+      playSound('finish', soundOn);
       setMode('result');
       return;
     }
@@ -238,6 +298,13 @@ function App() {
     setSyncText('');
     setSyncMessage('');
     setMode('home');
+  };
+
+  const toggleSound = () => {
+    const next = !soundOn;
+    setSoundOn(next);
+    localStorage.setItem(SOUND_KEY, next ? 'on' : 'off');
+    if (next) playSound('correct', true);
   };
 
   const exportSyncCode = async () => {
@@ -418,6 +485,15 @@ function App() {
         <section className="screen">
           <div className="panel">
             <h2>設定</h2>
+            <div className="setting-row">
+              <div>
+                <strong>効果音</strong>
+                <p>正解、不正解、5問達成、終了時に短い音を鳴らします。</p>
+              </div>
+              <button className={`toggle-button ${soundOn ? 'on' : ''}`} onClick={toggleSound}>
+                {soundOn ? 'ON' : 'OFF'}
+              </button>
+            </div>
             <p>PCとスマホで同じ履歴を使う場合は、片方で同期コードを作り、もう片方で取り込んでください。</p>
             <div className="sync-box">
               <button className="primary-button" onClick={exportSyncCode}>同期コードを作る</button>

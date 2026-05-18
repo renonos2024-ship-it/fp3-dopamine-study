@@ -370,6 +370,34 @@ h2 {
   font-size: 0.86rem;
 }
 
+.setting-row {
+  display: grid;
+  grid-template-columns: 1fr 78px;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border-radius: 16px;
+  background: #111827;
+}
+
+.setting-row strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.toggle-button {
+  min-height: 42px;
+  border-radius: 999px;
+  color: #f9fafb;
+  background: #374151;
+  font-weight: 900;
+}
+
+.toggle-button.on {
+  color: #111827;
+  background: #f59e0b;
+}
+
 @media (max-width: 360px) {
   .app-shell {
     padding-inline: 12px;
