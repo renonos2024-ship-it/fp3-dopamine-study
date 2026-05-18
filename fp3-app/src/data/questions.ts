@@ -1,3 +1,5 @@
+import { generatedQuestions } from './generatedQuestions';
+
 export type Category =
   | 'ライフプランニング'
   | 'リスク管理'
@@ -10,6 +12,7 @@ export type Question = {
   id: string;
   category: Category;
   examType?: '学科' | '実技';
+  tags?: string[];
   question: string;
   choices: string[];
   answerIndex: number;
@@ -25,7 +28,7 @@ export const categories: Category[] = [
   '相続・事業承継',
 ];
 
-export const questions: Question[] = [
+const baseQuestions: Question[] = [
   {
     id: 'life-001',
     category: 'ライフプランニング',
@@ -615,3 +618,5 @@ export const questions: Question[] = [
     explanation: '150万円 - 110万円 = 40万円が課税価格の基本です。暗記ポイント: 暦年贈与はまず110万円を引く。',
   },
 ];
+
+export const questions: Question[] = [...baseQuestions, ...generatedQuestions];

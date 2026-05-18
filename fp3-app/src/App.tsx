@@ -25,13 +25,14 @@ type StudyState = {
 type Mode = 'home' | 'quiz' | 'category' | 'settings' | 'result';
 type ReviewChoice = 'understood' | 'review' | null;
 type ExamFilter = '全部' | '学科' | '実技';
+type SessionMode = 'five' | 'ten' | 'review' | 'category' | 'examAcademic' | 'examPractical' | 'calculation' | 'weakBoost';
 
 type QuizSession = {
   title: string;
   questions: Question[];
   index: number;
   correctCount: number;
-  mode: 'five' | 'ten' | 'review' | 'category';
+  mode: SessionMode;
 };
 
 const STORAGE_KEY = 'fp3-dopaben-v1';
@@ -143,6 +144,26 @@ function shuffle<T>(items: T[]): T[] {
 
 function examTypeFor(question: Question): '学科' | '実技' {
   return question.examType ?? '学科';
+}
+
+function isCalculationQuestion(question: Question) {
+  return question.tags?.includes('計算') || /[0-9０-９].*(%|％|万円|平方メートル|倍|円)/.test(question.question);
+}
+
+function shuffleQuestionChoices(question: Question): Question {
+  const answer = question.choices[question.answerIndex];
+  const choices = shuffle(question.choices);
+  return {
+    ...question,
+    choices,
+    answerIndex: choices.indexOf(answer),
+  };
+}
+
+function weakWeightedPool(pool: Question[], logs: AnswerLog[]) {
+  const stats = categoryStats(logs, pool);
+  const weightByCategory = new Map(stats.map((item) => [item.category, item.answered ? Math.max(1, 5 - Math.floor(item.rate / 25)) : 2]));
+  return pool.flatMap((question) => Array.from({ length: weightByCategory.get(question.category) ?? 1 }, () => question));
 }
 
 function isYesterday(date: string) {
@@ -270,7 +291,10 @@ function App() {
   const [examFilter, setExamFilter] = useState<ExamFilter>('全部');
 
   const today = todayKey();
-  const activeQuestions = questions.filter((question) => examFilter === '全部' || examTypeFor(question) === examFilter);
+  const activeQuestions = useMemo(
+    () => questions.filter((question) => examFilter === '全部' || examTypeFor(question) === examFilter),
+    [examFilter],
+  );
   const todaysLogs = study.logs.filter((log) => log.answeredAt.slice(0, 10) === today);
   const totalCorrect = study.logs.filter((log) => log.correct).length;
   const totalRate = study.logs.length ? Math.round((totalCorrect / study.logs.length) * 100) : 0;
@@ -285,7 +309,7 @@ function App() {
   const academicTotal = questions.filter((question) => examTypeFor(question) === '学科').length;
   const practicalTotal = questions.filter((question) => examTypeFor(question) === '実技').length;
 
-  const startSession = (type: QuizSession['mode'], category?: Category) => {
+  const startSession = (type: SessionMode, category?: Category) => {
     let pool = activeQuestions;
     let title = 'ランダム10問';
     let count = 10;
@@ -303,6 +327,30 @@ function App() {
       count = Math.min(10, pool.length);
     }
 
+    if (type === 'weakBoost') {
+      pool = weakWeightedPool(activeQuestions, study.logs);
+      title = '弱点ブースト10問';
+      count = Math.min(10, pool.length);
+    }
+
+    if (type === 'examAcademic') {
+      pool = questions.filter((question) => examTypeFor(question) === '学科');
+      title = '学科 本番60問';
+      count = Math.min(60, pool.length);
+    }
+
+    if (type === 'examPractical') {
+      pool = questions.filter((question) => examTypeFor(question) === '実技');
+      title = '実技 本番40問';
+      count = Math.min(40, pool.length);
+    }
+
+    if (type === 'calculation') {
+      pool = questions.filter(isCalculationQuestion);
+      title = '計算だけ特訓';
+      count = Math.min(20, pool.length);
+    }
+
     if (type === 'category' && category) {
       pool = activeQuestions.filter((question) => question.category === category);
       title = category;
@@ -311,7 +359,7 @@ function App() {
 
     setSession({
       title,
-      questions: shuffle(pool).slice(0, count),
+      questions: shuffle(pool).slice(0, count).map(shuffleQuestionChoices),
       index: 0,
       correctCount: 0,
       mode: type,
@@ -353,6 +401,7 @@ function App() {
     if (!session || selectedIndex !== null) return;
     const current = session.questions[session.index];
     const correct = choiceIndex === current.answerIndex;
+    navigator.vibrate?.(correct ? 18 : [20, 40, 20]);
     setSelectedIndex(choiceIndex);
     setLastCorrect(correct);
     const penalty = updateStudy(current, correct, !correct);
@@ -534,8 +583,19 @@ function App() {
             <button className="primary-button" onClick={() => startSession('five')}>5問だけやる</button>
             <button className="secondary-button" onClick={() => startSession('ten')}>ランダム10問</button>
             <button className="secondary-button" onClick={() => startSession('review')}>苦手だけ復習</button>
+            <button className="secondary-button hot" onClick={() => startSession('weakBoost')}>弱点ブースト10問</button>
+            <button className="secondary-button" onClick={() => startSession('calculation')}>計算だけ特訓</button>
             <button className="secondary-button" onClick={() => setMode('category')}>分野別に解く</button>
           </div>
+
+          <section className="panel boss-panel">
+            <p className="eyebrow">直前モード</p>
+            <h2>本番と同じ重さで削る</h2>
+            <div className="two-buttons">
+              <button className="primary-button boss-button" onClick={() => startSession('examAcademic')}>学科60問</button>
+              <button className="primary-button boss-button" onClick={() => startSession('examPractical')}>実技40問</button>
+            </div>
+          </section>
 
           <section className="panel">
             <h2>分野Lv</h2>
@@ -571,6 +631,14 @@ function App() {
             <strong>
               {session.index + 1}/{session.questions.length}
             </strong>
+          </div>
+          <div className="quiz-progress" aria-label="セッション進捗">
+            <span style={{ width: `${((session.index + 1) / session.questions.length) * 100}%` }} />
+          </div>
+          <div className="combo-strip">
+            <span>正解 {session.correctCount}</span>
+            <span>残り {session.questions.length - session.index - 1}</span>
+            <span>{isCalculationQuestion(session.questions[session.index]) ? '計算問題' : '知識問題'}</span>
           </div>
           <article className="question-card">
             <p className="category-pill">{examTypeFor(session.questions[session.index])} / {session.questions[session.index].category}</p>
