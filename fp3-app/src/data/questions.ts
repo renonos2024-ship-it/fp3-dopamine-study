@@ -12,6 +12,7 @@ export type Question = {
   id: string;
   category: Category;
   examType?: '学科' | '実技';
+  examFormat?: '正誤' | '三答択一' | '四択';
   tags?: string[];
   question: string;
   choices: string[];

@@ -494,6 +494,15 @@ h2 {
   font-size: 0.92rem;
 }
 
+.memory-list {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding-left: 20px;
+  color: #e5e7eb;
+  line-height: 1.65;
+}
+
 .glossary-list {
   display: grid;
   gap: 8px;

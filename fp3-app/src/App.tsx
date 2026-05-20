@@ -151,6 +151,7 @@ function isCalculationQuestion(question: Question) {
 }
 
 function shuffleQuestionChoices(question: Question): Question {
+  if (question.examFormat === '正誤') return question;
   const answer = question.choices[question.answerIndex];
   const choices = shuffle(question.choices);
   return {
@@ -158,6 +159,75 @@ function shuffleQuestionChoices(question: Question): Question {
     choices,
     answerIndex: choices.indexOf(answer),
   };
+}
+
+function withUniqueQuestions(pool: Question[]) {
+  const seen = new Set<string>();
+  return pool.filter((question) => {
+    if (seen.has(question.id)) return false;
+    seen.add(question.id);
+    return true;
+  });
+}
+
+function makeTrueFalseQuestion(question: Question, index: number): Question {
+  const correctStatement = question.choices[question.answerIndex];
+  const wrongStatements = question.choices.filter((_, choiceIndex) => choiceIndex !== question.answerIndex);
+  const statementIsCorrect = index % 2 === 0;
+  const statement = statementIsCorrect ? correctStatement : wrongStatements[index % wrongStatements.length];
+
+  return {
+    ...question,
+    id: `${question.id}-tf-${index}`,
+    examFormat: '正誤',
+    tags: [...(question.tags ?? []), '正誤', '本番形式'],
+    question: `次の記述は、FP3級の論点として適切か。\n\n${statement}`,
+    choices: ['適切', '不適切'],
+    answerIndex: statementIsCorrect ? 0 : 1,
+    explanation: statementIsCorrect
+      ? `${statement}。この記述は適切です。${question.explanation}`
+      : `この記述は不適切です。正しくは「${correctStatement}」です。${question.explanation}`,
+  };
+}
+
+function makeThreeChoiceQuestion(question: Question, index: number): Question {
+  const answer = question.choices[question.answerIndex];
+  const wrong = question.choices.filter((_, choiceIndex) => choiceIndex !== question.answerIndex).slice(0, 2);
+  return shuffleQuestionChoices({
+    ...question,
+    id: `${question.id}-three-${index}`,
+    examFormat: '三答択一',
+    tags: [...(question.tags ?? []), '三答択一', '本番形式'],
+    choices: [answer, ...wrong],
+    answerIndex: 0,
+  });
+}
+
+function buildAcademicExamQuestions(pool: Question[]) {
+  const academic = shuffle(pool.filter((question) => examTypeFor(question) === '学科'));
+  const firstHalf = academic.slice(0, 30).map(makeTrueFalseQuestion);
+  const secondHalf = academic.slice(30, 60).map(makeThreeChoiceQuestion);
+  return [...firstHalf, ...secondHalf];
+}
+
+function buildDailyChallengeQuestions(pool: Question[], weak: Category | 'まだなし') {
+  const weakPool = weak === 'まだなし' ? [] : pool.filter((question) => question.category === weak);
+  const practicalPool = pool.filter((question) => examTypeFor(question) === '実技');
+  const calculationPool = pool.filter(isCalculationQuestion);
+  const academicPool = pool.filter((question) => examTypeFor(question) === '学科');
+  const candidates = withUniqueQuestions([
+    ...shuffle(calculationPool),
+    ...shuffle(practicalPool),
+    ...shuffle(weakPool),
+    ...shuffle(academicPool),
+    ...shuffle(pool),
+  ]).slice(0, 5);
+
+  return candidates.map((question, index) => {
+    if (examTypeFor(question) === '学科' && index % 2 === 0) return makeTrueFalseQuestion(question, index);
+    if (examTypeFor(question) === '学科' && index % 2 === 1) return makeThreeChoiceQuestion(question, index);
+    return shuffleQuestionChoices(question);
+  });
 }
 
 function weakWeightedPool(pool: Question[], logs: AnswerLog[]) {
@@ -268,11 +338,43 @@ function glossaryFor(question: Question) {
 
 function reasoningFor(question: Question) {
   const answer = question.choices[question.answerIndex];
+  const formatHint =
+    question.examFormat === '正誤'
+      ? '正誤問題では、記述の一部だけが違うことがあります。主語、対象者、期間、上限額を一語ずつ確認します。'
+      : question.examFormat === '三答択一'
+        ? '三答択一は消去法が効きます。明らかな誤りを先に落として、残った選択肢の数字や対象者を比べます。'
+        : '選択肢が多い問題では、強すぎる断定表現と制度名の取り違えを先に疑います。';
   return {
     answer,
-    why: `この問題は「${answer}」がキーワードです。FP3級では、制度の名前よりも「誰が対象か」「いつ使うか」「何を差し引くか」を押さえると解きやすくなります。`,
-    trap: '迷った選択肢は、「必ず」「全額」「一切」「無条件」のような強すぎる表現を疑うと切れます。FPの制度は所得要件、期間、上限、対象者がセットで出ます。',
+    why: `この問題は「${answer}」がキーワードです。FP3級では、制度名だけでなく「誰が対象か」「いつ使うか」「何を差し引くか」「上限はいくらか」をセットで押さえると解きやすくなります。${formatHint}`,
+    trap: '迷った選択肢は、「必ず」「全額」「一切」「無条件」のような強すぎる表現を疑うと切れます。社会保険・税金・相続は、所得要件、期間、上限、対象者が変わるだけで正誤が反転します。',
   };
+}
+
+function memoryPointsFor(question: Question) {
+  const common = ['対象者', '金額・割合・期限', '所得控除か税額控除か'];
+  const byCategory: Record<Category, string[]> = {
+    ライフプランニング: ['公的年金は第1号・第2号・第3号の違い', '健康保険・雇用保険・労災保険の役割分担'],
+    リスク管理: ['契約者・被保険者・受取人の関係', '生命保険料控除と地震保険料控除の上限'],
+    金融資産運用: ['利回り・PER・PBRなどの計算式', 'NISAは利益非課税だが元本保証ではない'],
+    タックスプランニング: ['所得控除と税額控除の違い', '確定申告が必要になる代表例'],
+    不動産: ['建ぺい率・容積率の分子と分母', '契約前に重要事項説明、保有で固定資産税、取得で不動産取得税'],
+    '相続・事業承継': ['3か月、10か月、110万円、3,000万円+600万円×人数', '配偶者・子・直系尊属・兄弟姉妹の相続順位'],
+  };
+  return [...byCategory[question.category], ...common].slice(0, 4);
+}
+
+function triviaFor(question: Question) {
+  if (question.tags?.includes('計算') || isCalculationQuestion(question)) {
+    return '計算問題は式を先に書くと安定します。FP3級では複雑な数学より、何を分母にするか、何を差し引くかの読み取りで差がつきます。';
+  }
+  if (question.examFormat === '正誤') {
+    return '正誤式は短く見えて落とし穴が多い形式です。「だけ」「常に」「必ず」は本番でも頻出の危険語として処理すると正答率が上がります。';
+  }
+  if (question.examFormat === '三答択一') {
+    return '三答択一は3つしかない分、似た制度の比較が出やすいです。最初に制度ジャンルを決めてから、数字と対象者で絞ります。';
+  }
+  return 'FP3級は暗記量の試験に見えますが、合否を分けるのは「似た制度を混ぜないこと」です。制度名、対象者、手続き、期限を1セットで覚えると崩れにくくなります。';
 }
 
 function App() {
@@ -313,10 +415,12 @@ function App() {
     let pool = activeQuestions;
     let title = 'ランダム10問';
     let count = 10;
+    let sessionQuestions: Question[] | null = null;
 
     if (type === 'five') {
-      title = '今日の5問';
+      title = '今日の5問 本番寄せ';
       count = 5;
+      sessionQuestions = buildDailyChallengeQuestions(activeQuestions, weak);
     }
 
     if (type === 'review') {
@@ -336,13 +440,13 @@ function App() {
     if (type === 'examAcademic') {
       pool = questions.filter((question) => examTypeFor(question) === '学科');
       title = '学科 本番60問';
-      count = Math.min(60, pool.length);
+      sessionQuestions = buildAcademicExamQuestions(pool);
     }
 
     if (type === 'examPractical') {
       pool = questions.filter((question) => examTypeFor(question) === '実技');
-      title = '実技 本番40問';
-      count = Math.min(40, pool.length);
+      title = '実技 本番20問';
+      count = Math.min(20, pool.length);
     }
 
     if (type === 'calculation') {
@@ -359,7 +463,7 @@ function App() {
 
     setSession({
       title,
-      questions: shuffle(pool).slice(0, count).map(shuffleQuestionChoices),
+      questions: sessionQuestions ?? shuffle(pool).slice(0, count).map(shuffleQuestionChoices),
       index: 0,
       correctCount: 0,
       mode: type,
@@ -548,7 +652,7 @@ function App() {
               </div>
               <div>
                 <strong>実技</strong>
-                <span>40問 / 60点以上</span>
+                <span>20問 / 60点以上</span>
               </div>
             </div>
             <p>現状は学科 {academicTotal}問、実技 {practicalTotal}問。合格用にはこの後、実技ケース問題と計算問題をさらに増やす前提です。</p>
@@ -580,7 +684,7 @@ function App() {
           </section>
 
           <div className="action-stack">
-            <button className="primary-button" onClick={() => startSession('five')}>5問だけやる</button>
+            <button className="primary-button" onClick={() => startSession('five')}>本番寄せ5問</button>
             <button className="secondary-button" onClick={() => startSession('ten')}>ランダム10問</button>
             <button className="secondary-button" onClick={() => startSession('review')}>苦手だけ復習</button>
             <button className="secondary-button hot" onClick={() => startSession('weakBoost')}>弱点ブースト10問</button>
@@ -593,7 +697,7 @@ function App() {
             <h2>本番と同じ重さで削る</h2>
             <div className="two-buttons">
               <button className="primary-button boss-button" onClick={() => startSession('examAcademic')}>学科60問</button>
-              <button className="primary-button boss-button" onClick={() => startSession('examPractical')}>実技40問</button>
+              <button className="primary-button boss-button" onClick={() => startSession('examPractical')}>実技20問</button>
             </div>
           </section>
 
@@ -678,6 +782,14 @@ function App() {
                 <p>{reasoningFor(session.questions[session.index]).why}</p>
                 <h3>ひっかけの見抜き方</h3>
                 <p>{reasoningFor(session.questions[session.index]).trap}</p>
+                <h3>覚えるべきこと</h3>
+                <ul className="memory-list">
+                  {memoryPointsFor(session.questions[session.index]).map((point) => (
+                    <li key={point}>{point}</li>
+                  ))}
+                </ul>
+                <h3>豆知識</h3>
+                <p>{triviaFor(session.questions[session.index])}</p>
                 {glossaryFor(session.questions[session.index]).length > 0 && (
                   <>
                     <h3>単語ミニ辞典</h3>
