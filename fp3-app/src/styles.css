@@ -93,7 +93,8 @@ h2 {
 .panel,
 .question-card,
 .answer-panel,
-.mini-card {
+.mini-card,
+.countdown-card {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 20px;
   background: #1f2937;
@@ -152,6 +153,31 @@ h2 {
 .type-label {
   color: #f9fafb;
   font-weight: 800;
+}
+
+.countdown-card {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  background:
+    linear-gradient(135deg, rgba(245, 158, 11, 0.18), rgba(34, 197, 94, 0.09)),
+    #1f2937;
+}
+
+.countdown-card strong {
+  color: #f59e0b;
+  font-size: 2.4rem;
+  line-height: 1;
+}
+
+.countdown-card p {
+  color: #e5e7eb;
+  line-height: 1.7;
+}
+
+.countdown-card span {
+  color: #fbbf24;
+  font-weight: 900;
 }
 
 .mini-grid {

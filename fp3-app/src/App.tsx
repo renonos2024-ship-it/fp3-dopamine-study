@@ -40,6 +40,7 @@ const SOUND_KEY = 'fp3-dopaben-sound-v1';
 const CORRECT_XP = 10;
 const WRONG_XP = -5;
 const MISSED_DAY_PENALTY = 30;
+const EXAM_DATE = '2026-06-10';
 const todayKey = () => new Date().toISOString().slice(0, 10);
 
 const initialState: StudyState = {
@@ -144,6 +145,16 @@ function shuffle<T>(items: T[]): T[] {
 
 function examTypeFor(question: Question): '学科' | '実技' {
   return question.examType ?? '学科';
+}
+
+function rootQuestionId(questionId: string) {
+  return questionId.replace(/-(tf|three)-\d+$/, '');
+}
+
+function daysUntilExam() {
+  const today = new Date(`${todayKey()}T00:00:00`);
+  const exam = new Date(`${EXAM_DATE}T00:00:00`);
+  return Math.max(0, Math.ceil((exam.getTime() - today.getTime()) / 86400000));
 }
 
 function isCalculationQuestion(question: Question) {
@@ -289,6 +300,20 @@ function weakestCategory(logs: AnswerLog[]): Category | 'まだなし' {
   return answered.sort((a, b) => a.rate - b.rate || b.answered - a.answered)[0].category;
 }
 
+function studyPlan(logs: AnswerLog[]) {
+  const understoodRootIds = new Set(
+    logs.filter((log) => log.correct && !log.review).map((log) => rootQuestionId(log.questionId)),
+  );
+  const remaining = questions.filter((question) => !understoodRootIds.has(question.id)).length;
+  const daysLeft = daysUntilExam();
+  const studyDays = Math.max(1, daysLeft);
+  return {
+    daysLeft,
+    remaining,
+    perDay: Math.ceil(remaining / studyDays),
+  };
+}
+
 const glossary = [
   ['老齢基礎年金', '国民年金から出る老後の年金。会社員も自営業も共通の土台です。'],
   ['国民年金', '20歳以上60歳未満の人が原則加入する公的年金です。'],
@@ -410,6 +435,7 @@ function App() {
   const masteryRate = Math.round((activeUnderstoodCount / activeQuestions.length) * 100);
   const academicTotal = questions.filter((question) => examTypeFor(question) === '学科').length;
   const practicalTotal = questions.filter((question) => examTypeFor(question) === '実技').length;
+  const plan = studyPlan(study.logs);
 
   const startSession = (type: SessionMode, category?: Category) => {
     let pool = activeQuestions;
@@ -626,6 +652,18 @@ function App() {
             </div>
             <p className="type-label">{getUserType(study)} / XP {study.xp}</p>
           </div>
+
+          <section className="countdown-card">
+            <div>
+              <p className="eyebrow">試験まで</p>
+              <strong>あと{plan.daysLeft}日</strong>
+            </div>
+            <p>
+              未理解 {plan.remaining}問。6/10までに一周するなら、今日から
+              <span> 1日{plan.perDay}問 </span>
+              で間に合います。
+            </p>
+          </section>
 
           <div className="mini-grid">
             <div className="mini-card">
